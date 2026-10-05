@@ -161,8 +161,6 @@ jobs:
 
       - name: Build libfakeinput.so and libblsession.so (glibc aarch64)
         if: steps.preloads.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           sudo apt-get update -qq
@@ -188,16 +186,14 @@ jobs:
           for f in tools/linuxfs/overlay/usr/bin/* tools/linuxfs/overlay/usr/bin/steamos-polkit-helpers/*; do
             [ -f "$f" ] && install -Dm644 "$f" "$D/${f#tools/linuxfs/overlay/}"
           done
-          # Component releases are public on another repo. This job's token only
-          # covers the current repository; left set, gh reports those releases
-          # as missing ("release not found").
-          fetch_release() {
-            env -u GH_TOKEN -u GITHUB_TOKEN gh release download "$@"
-          }
+          # Public component assets. curl does not send the job token: a
+          # fork-scoped token makes the releases API say "release not found",
+          # and gh refuses to run at all when that token is removed.
           if [ -f tools/gamescope/release.env ]; then
             . tools/gamescope/release.env
             : "${GAMESCOPE_REPO:=Droid-Deck/DroidDeck}"
-            fetch_release "${GAMESCOPE_TAG}" -R "${GAMESCOPE_REPO}" -p gamescope.tzst -O gamescope.tzst
+            curl -fsSL --retry 3 -o gamescope.tzst \
+              "https://github.com/${GAMESCOPE_REPO}/releases/download/${GAMESCOPE_TAG}/gamescope.tzst"
             echo "${GAMESCOPE_SHA256}  gamescope.tzst" | sha256sum -c -
             tar --use-compress-program=unzstd -xf gamescope.tzst -C "$D"
             test -f "$D/usr/local/bin/gamescope"
@@ -206,7 +202,8 @@ jobs:
           if [ -f tools/wlroots/release.env ]; then
             . tools/wlroots/release.env
             : "${WLROOTS_REPO:=Droid-Deck/DroidDeck}"
-            fetch_release "${WLROOTS_TAG}" -R "${WLROOTS_REPO}" -p wlroots.tzst -O wlroots.tzst
+            curl -fsSL --retry 3 -o wlroots.tzst \
+              "https://github.com/${WLROOTS_REPO}/releases/download/${WLROOTS_TAG}/wlroots.tzst"
             echo "${WLROOTS_SHA256}  wlroots.tzst" | sha256sum -c -
             tar --use-compress-program=unzstd -xf wlroots.tzst -C "$D"
             test -f "$D/usr/local/lib/droiddeck-wlroots/libwlroots-0.20.so"
@@ -262,24 +259,21 @@ jobs:
           ls -l app/src/main/assets/linuxfs/x86_64 app/src/main/assets/linuxfs/i386
 
       - name: Bundle the droiddeck-esync packs
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Same token scope as the gamescope/wlroots fetch: SYNC_BUNDLE_REPO is
-          # not this repository (Droid-Deck/DroidDeck-Components).
-          fetch_release() {
-            env -u GH_TOKEN -u GITHUB_TOKEN gh release download "$@"
-          }
+          # Same public URL fetch as gamescope/wlroots. The bundle is on
+          # Droid-Deck/DroidDeck-Components, not this repository.
           if [ -f tools/droiddeck-esync/release.env ]; then
             . tools/droiddeck-esync/release.env
             : "${SYNC_BUNDLE_REPO:=Droid-Deck/DroidDeck-Components}"
-            fetch_release "$SYNC_BUNDLE_TAG" -R "$SYNC_BUNDLE_REPO" -p "$SYNC_BUNDLE_ASSET" -O sync-bundle.tzst
+            curl -fsSL --retry 3 -o sync-bundle.tzst \
+              "https://github.com/${SYNC_BUNDLE_REPO}/releases/download/${SYNC_BUNDLE_TAG}/${SYNC_BUNDLE_ASSET}"
             echo "$SYNC_BUNDLE_SHA256  sync-bundle.tzst" | sha256sum -c -
             mkdir -p app/src/main/assets/droiddeck-esync
             tar --use-compress-program=unzstd -xf sync-bundle.tzst -C app/src/main/assets/droiddeck-esync
             rm sync-bundle.tzst
-            fetch_release "$SYNC_BUNDLE_TAG" -R "$SYNC_BUNDLE_REPO" -p index.json -O sync-index.json
+            curl -fsSL --retry 3 -o sync-index.json \
+              "https://github.com/${SYNC_BUNDLE_REPO}/releases/download/${SYNC_BUNDLE_TAG}/index.json"
             revoked=$(python3 -c 'import json, sys; print(" ".join(p["id"] for p in json.load(open(sys.argv[1]))["packs"] if p.get("revoked") is True))' sync-index.json)
             for id in $revoked; do
               if [ -e "app/src/main/assets/droiddeck-esync/packs/$id.tzst" ]; then
