@@ -132,6 +132,7 @@ class GpuStatsComponent(val dir: File) : SessionPart() {
         private const val QCOM_GPU = "/sys/kernel/gpu"
         private val LOAD_SOURCES = listOf(
             "$KGSL/gpu_busy_percentage", "$KGSL/devfreq/gpu_load", "$KGSL/gpuload", "$QCOM_GPU/gpu_busy",
+            "/sys/class/misc/mali0/device/utilization", "/sys/kernel/gpu/gpu_busy",
         )
         /** The GPU's devfreq node is named by its register address, which differs between Snapdragons. */
         private val DEVFREQ_NODES = listOf(
@@ -144,7 +145,7 @@ class GpuStatsComponent(val dir: File) : SessionPart() {
             )
             DEVFREQ_NODES.forEach { sources.add("/sys/class/devfreq/$it/cur_freq") }
             File("/sys/class/devfreq").list()?.sorted()?.forEach { node ->
-                if (node.contains("kgsl") || node.contains("gpu")) sources.add("/sys/class/devfreq/$node/cur_freq")
+                if (node.contains("kgsl") || node.contains("gpu") || node.contains("mali")) sources.add("/sys/class/devfreq/$node/cur_freq")
             }
             return sources.distinct()
         }

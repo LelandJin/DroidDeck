@@ -23,6 +23,28 @@ class DriverPairsTest {
         assertEquals(Family.A6XX, GpuInfo.familyOf(true, 610))
         assertEquals(Family.ADRENO_UNKNOWN, GpuInfo.familyOf(true, 0))
         assertEquals(Family.NOT_ADRENO, GpuInfo.familyOf(false, 0))
+        assertEquals(Family.XRING_O3, GpuInfo.familyOf(false, 0, xringO3 = true))
+    }
+
+    @Test
+    fun xringO3IsTheXiaomi18FoldAndDoesNotTakeTurnip() {
+        assertTrue(GpuInfo.looksLikeXringO3("xring_o3_asic", "O3", "Xiaomi"))
+        assertTrue(GpuInfo.looksLikeXringO3("xring_o3_asic", "", "Xiaomi"))
+        assertFalse(GpuInfo.looksLikeXringO3("qcom", "SM8750", "Xiaomi"))
+        assertFalse(GpuInfo.looksLikeXringO3("mt6991", "Dimensity", "Xiaomi"))
+        val fold = GpuInfo("Mali-G2 Ultra NX", 0, Family.XRING_O3, "XRING O3", false)
+        assertEquals(GpuInfo.Support.TESTED, fold.support)
+        assertFalse(fold.supportText.contains("needs an Adreno"))
+        assertNull(DriverPairs.recommendedKey(fold, emptyList()))
+        val banner = DriverPairs.from(TurnipReleases.Check(
+            listOf(
+                asset("Turnip-r4.zip", "r4", false, DriverPairs.BANNER),
+                asset("Turnip-r4-Linux.zip", "r4", true, DriverPairs.BANNER),
+            ),
+            emptyList(), emptyList(), 0L,
+        ))
+        assertTrue(banner.any { it.key == DriverPairs.BANNER })
+        assertFalse(banner.first { it.key == DriverPairs.BANNER }.suits(fold))
     }
 
     @Test

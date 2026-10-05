@@ -9,6 +9,7 @@ import android.util.Base64
 import android.util.Log
 import com.droiddeck.launcher.core.FileUtils
 import com.droiddeck.launcher.core.HostProcess
+import com.droiddeck.launcher.gpu.GpuInfo
 import com.droiddeck.launcher.session.SessionPrefs
 import org.json.JSONObject
 import java.io.DataInputStream
@@ -228,6 +229,7 @@ object BwrapSpawner {
      * own choice of driver (VK_ICD_FILENAMES, MESA_LOADER_DRIVER_OVERRIDE) is left alone.
      */
     private fun gpu(rootfs: String, root: File, env: MutableMap<String, String>): List<Bind>? {
+        if (GpuInfo.detect().family == GpuInfo.Family.XRING_O3) return panvk(rootfs, root, env)
         val lib = File(rootfs, "usr/lib")
         val driver = File(lib, "libvulkan_freedreno.so")
         if (!driver.isFile || !File("/dev/kgsl-3d0").exists()) return null
@@ -253,6 +255,33 @@ object BwrapSpawner {
             env["GALLIUM_DRIVER"] = "zink"
         }
         // The driver's own libraries, found beside it; nothing else is in that directory.
+        env["LD_LIBRARY_PATH"] = listOf(env["LD_LIBRARY_PATH"], GPU_DIR).filter { !it.isNullOrEmpty() }.joinToString(":")
+        return binds
+    }
+
+    /**
+     * Flatpak apps on Xiaomi 18 Fold. The runtime's Turnip is KGSL-only; if the rootfs ships a
+     * glibc PanVK, point the sandbox at it and at /dev/mali0 (already visible via /dev). Without
+     * that library the app keeps llvmpipe, same as any GPU this function declines.
+     */
+    private fun panvk(rootfs: String, root: File, env: MutableMap<String, String>): List<Bind>? {
+        if (!File("/dev/mali0").exists()) return null
+        if (env.containsKey("VK_ICD_FILENAMES") || env.containsKey("VK_DRIVER_FILES")) return null
+        val lib = File(rootfs, "usr/lib")
+        val driver = listOf("libvulkan_panfrost.so", "libvulkan_mali.so")
+            .firstNotNullOfOrNull { name -> File(lib, name).takeIf { it.isFile } } ?: return null
+        val binds = ArrayList<Bind>()
+        binds.add(Bind(driver.canonicalPath, "$GPU_DIR/${driver.name}"))
+        val icd = File(root.parentFile, "panfrost_icd.json")
+        icd.writeText("{\"file_format_version\": \"1.0.0\", \"ICD\": {\"library_path\": \"$GPU_DIR/${driver.name}\", \"api_version\": \"1.4.0\"}}\n")
+        binds.add(Bind(icd.path, "$GPU_DIR/panfrost_icd.json"))
+        env["VK_DRIVER_FILES"] = "$GPU_DIR/panfrost_icd.json"
+        env["VK_ICD_FILENAMES"] = "$GPU_DIR/panfrost_icd.json"
+        env["PAN_I_WANT_A_BROKEN_VULKAN_DRIVER"] = "1"
+        if (!env.containsKey("MESA_LOADER_DRIVER_OVERRIDE") && !env.containsKey("GALLIUM_DRIVER")) {
+            env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
+            env["GALLIUM_DRIVER"] = "zink"
+        }
         env["LD_LIBRARY_PATH"] = listOf(env["LD_LIBRARY_PATH"], GPU_DIR).filter { !it.isNullOrEmpty() }.joinToString(":")
         return binds
     }

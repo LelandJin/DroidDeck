@@ -6,6 +6,7 @@ import android.system.ErrnoException;
 import android.system.Os;
 import android.system.StructStat;
 import android.system.StructUtsname;
+import com.droiddeck.launcher.gpu.GpuInfo;
 import com.droiddeck.launcher.session.SessionPrefs;
 
 
@@ -34,6 +35,8 @@ public final class LinuxRuntime {
     /** Shortcut extra naming which of the modes above a Linux entry launches. */
     public static final String EXTRA_LINUX_MODE = "linux_mode";
     private static final String KGSL_DEVICE = "/dev/kgsl-3d0";
+    /** Arm kbase node. Xiaomi 18 Fold's Mali-G2 Ultra NX (XRING O3) lives here, not on KGSL. */
+    private static final String MALI_DEVICE = "/dev/mali0";
     /**
      * Where the guest sees a command's XDG_RUNTIME_DIR. A Unix socket's path must fit in 108 bytes,
      * and libwayland checks the guest's path before proot ever sees it: with the app on an SD card
@@ -102,6 +105,15 @@ public final class LinuxRuntime {
         File icdDir = new File(rootDir(context), "usr/share/vulkan/icd.d");
         File[] manifests = icdDir.listFiles((dir, name) -> name.endsWith(".json"));
         if (manifests == null) return null;
+        // Turnip's freedreno ICD opens /dev/kgsl-3d0. XRING O3 has no such node; only a PanVK/Mali
+        // manifest is usable, and only when the rootfs actually ships one.
+        if (GpuInfo.Companion.detect().getFamily() == GpuInfo.Family.XRING_O3) {
+            for (File manifest : manifests) {
+                String n = manifest.getName().toLowerCase(java.util.Locale.US);
+                if (n.contains("panfrost") || n.contains("panvk") || n.contains("mali")) return manifest;
+            }
+            return null;
+        }
         for (File manifest : manifests) {
             if (manifest.getName().contains("freedreno")) return manifest;
         }
@@ -284,11 +296,21 @@ public final class LinuxRuntime {
      * Turnip build reports the same device numbers for it.
      */
     private static void bindGpuNode(Context context, List<String> cmd) {
+        String gpuDevice = KGSL_DEVICE;
+        String driverName = "kgsl-3d0";
+        String driverLink = "/sys/bus/platform/drivers/msm_drm";
         StructStat st;
         try {
             st = Os.stat(KGSL_DEVICE);
         } catch (ErrnoException e) {
-            return;
+            try {
+                st = Os.stat(MALI_DEVICE);
+            } catch (ErrnoException ignored) {
+                return;
+            }
+            gpuDevice = MALI_DEVICE;
+            driverName = "mali";
+            driverLink = "/sys/bus/platform/drivers/mali";
         }
         long dev = st.st_rdev;
         long major = ((dev >> 8) & 0xfff) | ((dev >> 32) & ~0xfffL);
@@ -306,7 +328,7 @@ public final class LinuxRuntime {
             Files.write(new File(drm, "dev").toPath(),
                     (major + ":" + minor + "\n").getBytes(StandardCharsets.UTF_8));
             Files.write(new File(device, "uevent").toPath(),
-                    "DRIVER=kgsl-3d0\nMODALIAS=platform:kgsl-3d0\n".getBytes(StandardCharsets.UTF_8));
+                    ("DRIVER=" + driverName + "\nMODALIAS=platform:" + driverName + "\n").getBytes(StandardCharsets.UTF_8));
             File subsystem = new File(device, "subsystem");
             if (!Files.isSymbolicLink(subsystem.toPath())) {
                 Os.symlink("/sys/bus/platform", subsystem.getPath());
@@ -315,14 +337,14 @@ public final class LinuxRuntime {
             // on a mainline kernel, and the driver it reads the load of (bindAdrenoStats).
             File driver = new File(device, "driver");
             if (!Files.isSymbolicLink(driver.toPath())) {
-                Os.symlink("/sys/bus/platform/drivers/msm_drm", driver.getPath());
+                Os.symlink(driverLink, driver.getPath());
             }
         } catch (IOException | ErrnoException e) {
             return;
         }
         bind(cmd, new File(base, "sys").getPath() + ":/sys/dev/char");
         bind(cmd, dri.getPath() + ":/dev/dri");
-        bind(cmd, KGSL_DEVICE + ":/dev/dri/" + node);
+        bind(cmd, gpuDevice + ":/dev/dri/" + node);
         bindDrmClass(base, cmd, node, major + ":" + minor);
     }
 
@@ -375,7 +397,9 @@ public final class LinuxRuntime {
 
     private static String gpuLoadSource() {
         String kgsl = "/sys/class/kgsl/kgsl-3d0/";
-        return firstReadable(kgsl + "gpu_busy_percentage", kgsl + "devfreq/gpu_load");
+        return firstReadable(kgsl + "gpu_busy_percentage", kgsl + "devfreq/gpu_load",
+                "/sys/class/misc/mali0/device/utilization",
+                "/sys/kernel/gpu/gpu_busy", "/sys/kernel/gpu/gpu_load");
     }
 
     /**
@@ -389,7 +413,9 @@ public final class LinuxRuntime {
         String gpuTemp = gpuTempSource();
         String[][] stats = {
                 {gpuLoadSource(), "/sys/kernel/debug/dri/0/perf_now"},
-                {firstReadable(kgsl + "devfreq/cur_freq", kgsl + "gpuclk"),
+                {firstReadable(kgsl + "devfreq/cur_freq", kgsl + "gpuclk",
+                        "/sys/class/misc/mali0/device/clock",
+                        "/sys/class/devfreq/gpufreq/cur_freq"),
                         "/sys/devices/platform/soc@0/3d00000.gpu/devfreq/3d00000.gpu/cur_freq"},
                 {gpuTemp, "/sys/class/thermal/thermal_zone28/temp"},
                 {gpuTemp, "/sys/class/thermal/thermal_zone26/temp"},

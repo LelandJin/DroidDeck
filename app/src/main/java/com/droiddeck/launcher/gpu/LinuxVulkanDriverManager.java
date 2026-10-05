@@ -69,7 +69,7 @@ public class LinuxVulkanDriverManager {
     public boolean isInstalled(String id) {
         if (id == null || id.isEmpty() || id.contains("/") || id.contains("..")) return false;
         File dir = getDriverDir(id);
-        return new File(dir, LIB_NAME).isFile() && new File(dir, ICD_NAME).isFile();
+        return new File(dir, ICD_NAME).isFile() && driverLibrary(dir) != null;
     }
 
     /** Absolute path of the driver's ICD manifest, or null when the id isn't installed. */
@@ -140,11 +140,12 @@ public class LinuxVulkanDriverManager {
                     // Flatten: only the base name matters, and it also defeats zip-slip paths.
                     String base = new File(entry.getName()).getName();
                     if (base.isEmpty()) continue;
-                    if (base.startsWith("libvulkan_freedreno") && base.endsWith(".so")) {
-                        if (soName != null) Log.w(TAG, "zip has several libvulkan_freedreno*.so; using the first (" + soName + ")");
+                    String stored = linuxLibraryName(base);
+                    if (stored != null) {
+                        if (soName != null) Log.w(TAG, "zip has several Vulkan drivers; using the first (" + soName + ")");
                         else {
-                            Files.copy(zis, new File(tmpDir, LIB_NAME).toPath(), StandardCopyOption.REPLACE_EXISTING);
-                            soName = base;
+                            Files.copy(zis, new File(tmpDir, stored).toPath(), StandardCopyOption.REPLACE_EXISTING);
+                            soName = stored;
                         }
                     } else if (base.equals(META_NAME)) {
                         try {
@@ -181,10 +182,10 @@ public class LinuxVulkanDriverManager {
     String adopt(File tmpDir, String soName, JSONObject zipMeta, String displayName) throws IOException {
         try {
             if (soName == null) {
-                throw new IllegalArgumentException("No libvulkan_freedreno*.so in this zip. An Android "
+                throw new IllegalArgumentException("No libvulkan_freedreno*.so or libvulkan_panfrost*.so in this zip. An Android "
                         + "(AdrenoTools) or -Wayland Turnip zip is not a Linux runtime driver.");
             }
-            File so = new File(tmpDir, LIB_NAME);
+            File so = new File(tmpDir, soName);
             if (!isAarch64Elf(so)) {
                 throw new IllegalArgumentException(soName + " is not a 64-bit AArch64 ELF shared library.");
             }
@@ -216,8 +217,8 @@ public class LinuxVulkanDriverManager {
             JSONObject icd = new JSONObject();
             icd.put("file_format_version", "1.0.0");
             JSONObject icdBody = new JSONObject();
-            icdBody.put("library_path", new File(dir, LIB_NAME).getAbsolutePath());
-            icdBody.put("api_version", "1.1.274");
+            icdBody.put("library_path", new File(dir, soName).getAbsolutePath());
+            icdBody.put("api_version", soName.contains("freedreno") ? "1.1.274" : "1.4.0");
             icd.put("ICD", icdBody);
             if (!FileUtils.writeString(new File(tmpDir, ICD_NAME), icd.toString(2))) throw new IOException("cannot write icd.json");
 
@@ -238,6 +239,21 @@ public class LinuxVulkanDriverManager {
         } catch (org.json.JSONException e) {
             throw new IOException("manifest write failed: " + e.getMessage());
         }
+    }
+
+    /** Freedreno stays under {@link #LIB_NAME}. PanVK/Mali keep the name the zip shipped. */
+    static String linuxLibraryName(String base) {
+        if (base.startsWith("libvulkan_freedreno") && base.endsWith(".so")) return LIB_NAME;
+        if ((base.startsWith("libvulkan_panfrost") || base.startsWith("libvulkan_panvk") || "libvulkan_mali.so".equals(base))
+                && base.endsWith(".so") && base.indexOf('/') < 0 && !base.contains("..")) return base;
+        return null;
+    }
+
+    private static File driverLibrary(File dir) {
+        File freedreno = new File(dir, LIB_NAME);
+        if (freedreno.isFile()) return freedreno;
+        File[] extra = dir.listFiles((d, name) -> name.startsWith("libvulkan_") && name.endsWith(".so"));
+        return extra != null && extra.length > 0 ? extra[0] : null;
     }
 
     private String uniqueId(String base) {

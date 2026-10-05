@@ -339,6 +339,12 @@ public final class TurnipDriver {
         }
         String model = gpuModel();
         Log.i(TAG, "gpu model: " + (model == null ? "unknown" : model));
+        // Xiaomi 18 Fold: Mali-G2 Ultra NX. Turnip's KGSL backend cannot open this GPU.
+        // null selects the system Vulkan loader (vulkan.mali.so).
+        if (GpuInfo.Companion.detect().getFamily() == GpuInfo.Family.XRING_O3) {
+            Log.i(TAG, "XRING O3: system Mali Vulkan, Turnip is not loaded");
+            return null;
+        }
         if (model != null) {
             // "Adreno750", "adreno_830" - the generation is the first digit of the three.
             java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d)\\d\\d").matcher(model);

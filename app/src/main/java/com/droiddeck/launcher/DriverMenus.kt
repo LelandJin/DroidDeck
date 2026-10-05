@@ -93,7 +93,11 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         androidRows = buildList {
             add(DriverRow(
                 TurnipDriver.AUTO, "Auto - picked by GPU",
-                if (auto == "system") "system Vulkan: no bundled build for this GPU" else "${td.displayName(auto)} (bundled)",
+                when {
+                    auto == "system" && gpu.family == GpuInfo.Family.XRING_O3 -> "system Mali Vulkan on 玄界 O3"
+                    auto == "system" -> "system Vulkan: no bundled build for this GPU"
+                    else -> "${td.displayName(auto)} (bundled)"
+                },
                 false,
             ))
             for (id in td.visibleBundled()) add(DriverRow(id, td.displayName(id), td.driverVersion(id), true, DriverRow.BUNDLED))
@@ -150,6 +154,11 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
     fun ensureAuto(force: Boolean) {
         mode = SessionPrefs.gpuDriverMode(activity)
         if (mode != SessionPrefs.GPU_DRIVERS_AUTO || pairBusy != null || releaseChecking) return
+        if (gpu.family == GpuInfo.Family.XRING_O3) {
+            autoCheckedThisProcess = true
+            autoStatus = "System Mali-G2 Vulkan. Turnip is Adreno-only and is not installed."
+            return
+        }
         if (!force && autoCheckedThisProcess) return
         autoCheckedThisProcess = true
         if (DriverPairs.recommendedKey(gpu, emptyList()) == null) {
