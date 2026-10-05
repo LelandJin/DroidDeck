@@ -188,9 +188,16 @@ jobs:
           for f in tools/linuxfs/overlay/usr/bin/* tools/linuxfs/overlay/usr/bin/steamos-polkit-helpers/*; do
             [ -f "$f" ] && install -Dm644 "$f" "$D/${f#tools/linuxfs/overlay/}"
           done
+          # Component releases are public on another repo. This job's token only
+          # covers the current repository; left set, gh reports those releases
+          # as missing ("release not found").
+          fetch_release() {
+            env -u GH_TOKEN -u GITHUB_TOKEN gh release download "$@"
+          }
           if [ -f tools/gamescope/release.env ]; then
             . tools/gamescope/release.env
-            gh release download "${GAMESCOPE_TAG}" -R "${GITHUB_REPOSITORY}" -p gamescope.tzst -O gamescope.tzst
+            : "${GAMESCOPE_REPO:=Droid-Deck/DroidDeck}"
+            fetch_release "${GAMESCOPE_TAG}" -R "${GAMESCOPE_REPO}" -p gamescope.tzst -O gamescope.tzst
             echo "${GAMESCOPE_SHA256}  gamescope.tzst" | sha256sum -c -
             tar --use-compress-program=unzstd -xf gamescope.tzst -C "$D"
             test -f "$D/usr/local/bin/gamescope"
@@ -198,7 +205,8 @@ jobs:
           fi
           if [ -f tools/wlroots/release.env ]; then
             . tools/wlroots/release.env
-            gh release download "${WLROOTS_TAG}" -R "${GITHUB_REPOSITORY}" -p wlroots.tzst -O wlroots.tzst
+            : "${WLROOTS_REPO:=Droid-Deck/DroidDeck}"
+            fetch_release "${WLROOTS_TAG}" -R "${WLROOTS_REPO}" -p wlroots.tzst -O wlroots.tzst
             echo "${WLROOTS_SHA256}  wlroots.tzst" | sha256sum -c -
             tar --use-compress-program=unzstd -xf wlroots.tzst -C "$D"
             test -f "$D/usr/local/lib/droiddeck-wlroots/libwlroots-0.20.so"
@@ -258,14 +266,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Same token scope as the gamescope/wlroots fetch: SYNC_BUNDLE_REPO is
+          # not this repository (Droid-Deck/DroidDeck-Components).
+          fetch_release() {
+            env -u GH_TOKEN -u GITHUB_TOKEN gh release download "$@"
+          }
           if [ -f tools/droiddeck-esync/release.env ]; then
             . tools/droiddeck-esync/release.env
-            gh release download "$SYNC_BUNDLE_TAG" -R "$SYNC_BUNDLE_REPO" -p "$SYNC_BUNDLE_ASSET" -O sync-bundle.tzst
+            : "${SYNC_BUNDLE_REPO:=Droid-Deck/DroidDeck-Components}"
+            fetch_release "$SYNC_BUNDLE_TAG" -R "$SYNC_BUNDLE_REPO" -p "$SYNC_BUNDLE_ASSET" -O sync-bundle.tzst
             echo "$SYNC_BUNDLE_SHA256  sync-bundle.tzst" | sha256sum -c -
             mkdir -p app/src/main/assets/droiddeck-esync
             tar --use-compress-program=unzstd -xf sync-bundle.tzst -C app/src/main/assets/droiddeck-esync
             rm sync-bundle.tzst
-            gh release download "$SYNC_BUNDLE_TAG" -R "$SYNC_BUNDLE_REPO" -p index.json -O sync-index.json
+            fetch_release "$SYNC_BUNDLE_TAG" -R "$SYNC_BUNDLE_REPO" -p index.json -O sync-index.json
             revoked=$(python3 -c 'import json, sys; print(" ".join(p["id"] for p in json.load(open(sys.argv[1]))["packs"] if p.get("revoked") is True))' sync-index.json)
             for id in $revoked; do
               if [ -e "app/src/main/assets/droiddeck-esync/packs/$id.tzst" ]; then
