@@ -180,22 +180,6 @@ docker run --rm --platform linux/amd64 \
         chown -R '"$(id -u):$(id -g)"' app/src/main/assets/linuxfs
     '
 
-github_repo=${DROIDDECK_GITHUB_REPOSITORY:-}
-if [[ -z "${github_repo}" ]]; then
-    origin_url=$(git -C "${repo_root}" remote get-url origin)
-    case "${origin_url}" in
-        https://github.com/*) github_repo=${origin_url#https://github.com/} ;;
-        ssh://git@github.com/*) github_repo=${origin_url#ssh://git@github.com/} ;;
-        git@github.com:*) github_repo=${origin_url#git@github.com:} ;;
-        *)
-            echo "Cannot determine the GitHub repository from origin: ${origin_url}" >&2
-            echo "Set DROIDDECK_GITHUB_REPOSITORY=owner/repo." >&2
-            exit 1
-            ;;
-    esac
-    github_repo=${github_repo%.git}
-fi
-
 # Pinned downloads are kept between builds, named by their checksum, so a rebuild fetches nothing
 # it already has. A cached file is checked again before use; a bad one is fetched anew.
 cache_dir=${DROIDDECK_BUILD_CACHE:-"${HOME}/.cache/droiddeck-build"}
@@ -219,16 +203,18 @@ cached() {
 
 if [[ -f "${repo_root}/tools/gamescope/release.env" ]]; then
     . "${repo_root}/tools/gamescope/release.env"
+    : "${GAMESCOPE_REPO:=Droid-Deck/DroidDeck}"
     gamescope_archive=$(cached "${GAMESCOPE_SHA256}" gamescope.tzst \
-        bash -c 'gh release download "$0" -R "$1" -p gamescope.tzst -O "$out"' "${GAMESCOPE_TAG}" "${github_repo}")
+        bash -c 'gh release download "$0" -R "$1" -p gamescope.tzst -O "$out"' "${GAMESCOPE_TAG}" "${GAMESCOPE_REPO}")
     zstd -dc "${gamescope_archive}" | tar -xf - -C "${linuxfs_dir}"
     test -f "${linuxfs_dir}/usr/local/bin/gamescope"
 fi
 
 if [[ -f "${repo_root}/tools/wlroots/release.env" ]]; then
     . "${repo_root}/tools/wlroots/release.env"
+    : "${WLROOTS_REPO:=Droid-Deck/DroidDeck}"
     wlroots_archive=$(cached "${WLROOTS_SHA256}" wlroots.tzst \
-        bash -c 'gh release download "$0" -R "$1" -p wlroots.tzst -O "$out"' "${WLROOTS_TAG}" "${github_repo}")
+        bash -c 'gh release download "$0" -R "$1" -p wlroots.tzst -O "$out"' "${WLROOTS_TAG}" "${WLROOTS_REPO}")
     zstd -dc "${wlroots_archive}" | tar -xf - -C "${linuxfs_dir}"
     test -f "${linuxfs_dir}/usr/local/lib/droiddeck-wlroots/libwlroots-0.20.so"
 fi
