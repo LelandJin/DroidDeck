@@ -1144,8 +1144,12 @@ class BundleTest(unittest.TestCase):
         steps = {step.get("name"): step for step in apk["jobs"]["build"]["steps"]}
         bundle = steps["Bundle the droiddeck-esync packs"]
         self.assertNotIn("if", bundle)
+        self.assertNotIn("env", bundle)
         self.assertIn("tools/droiddeck-esync/release.env", bundle["run"])
         self.assertEqual(bundle["run"].count('-R "$SYNC_BUNDLE_REPO"'), 2)
+        self.assertIn("curl -fsSL --retry 3", bundle["run"])
+        self.assertNotIn("gh release download", bundle["run"])
+        self.assertNotIn("GH_TOKEN", bundle["run"])
         self.assertIn("sha256sum -c -", bundle["run"])
         self.assertNotIn("revoked.txt", bundle["run"])
         stage = next(step for step in apk["jobs"]["build"]["steps"] if "overlay/usr/local/bin/droiddeck-*" in step.get("run", ""))
