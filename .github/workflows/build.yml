@@ -261,19 +261,38 @@ jobs:
       - name: Bundle the droiddeck-esync packs
         run: |
           set -euo pipefail
-          # Same public URL fetch as gamescope/wlroots. The bundle is on
-          # Droid-Deck/DroidDeck-Components, not this repository.
+          # Public HTTPS fetch. -R pins the components repo. curl does not send
+          # the job token: a fork-scoped token hides public releases, and the
+          # GitHub CLI will not run on a fresh runner once that token is
+          # removed. The bundle lives on Droid-Deck/DroidDeck-Components, not
+          # this repository.
+          fetch_public_asset() {
+            local tag="" repo="" asset="" out=""
+            while [ $# -gt 0 ]; do
+              case "$1" in
+                -R) repo=$2; shift 2 ;;
+                -p) asset=$2; shift 2 ;;
+                -O) out=$2; shift 2 ;;
+                -*) echo "fetch_public_asset: unknown option $1" >&2; return 1 ;;
+                *) tag=$1; shift ;;
+              esac
+            done
+            if [ -z "$tag" ] || [ -z "$repo" ] || [ -z "$asset" ] || [ -z "$out" ]; then
+              echo "fetch_public_asset: need tag, -R repo, -p asset, -O output" >&2
+              return 1
+            fi
+            curl -fsSL --retry 3 -o "$out" \
+              "https://github.com/${repo}/releases/download/${tag}/${asset}"
+          }
           if [ -f tools/droiddeck-esync/release.env ]; then
             . tools/droiddeck-esync/release.env
             : "${SYNC_BUNDLE_REPO:=Droid-Deck/DroidDeck-Components}"
-            curl -fsSL --retry 3 -o sync-bundle.tzst \
-              "https://github.com/${SYNC_BUNDLE_REPO}/releases/download/${SYNC_BUNDLE_TAG}/${SYNC_BUNDLE_ASSET}"
+            fetch_public_asset "$SYNC_BUNDLE_TAG" -R "$SYNC_BUNDLE_REPO" -p "$SYNC_BUNDLE_ASSET" -O sync-bundle.tzst
             echo "$SYNC_BUNDLE_SHA256  sync-bundle.tzst" | sha256sum -c -
             mkdir -p app/src/main/assets/droiddeck-esync
             tar --use-compress-program=unzstd -xf sync-bundle.tzst -C app/src/main/assets/droiddeck-esync
             rm sync-bundle.tzst
-            curl -fsSL --retry 3 -o sync-index.json \
-              "https://github.com/${SYNC_BUNDLE_REPO}/releases/download/${SYNC_BUNDLE_TAG}/index.json"
+            fetch_public_asset "$SYNC_BUNDLE_TAG" -R "$SYNC_BUNDLE_REPO" -p index.json -O sync-index.json
             revoked=$(python3 -c 'import json, sys; print(" ".join(p["id"] for p in json.load(open(sys.argv[1]))["packs"] if p.get("revoked") is True))' sync-index.json)
             for id in $revoked; do
               if [ -e "app/src/main/assets/droiddeck-esync/packs/$id.tzst" ]; then
