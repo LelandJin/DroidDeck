@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import com.droiddeck.launcher.session.SessionState
 import com.droiddeck.launcher.ui.UpdatesActions
 import com.droiddeck.launcher.ui.UpdatesState
@@ -110,6 +111,7 @@ internal class UpdatesMenu(private val activity: Activity, private val ui: Handl
     /** PackageInstaller's answer: Android's confirm prompt to show, or why it failed. Success restarts the app. */
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (!SelfInstaller.acceptStatus(intent)) return
             when (val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
                 PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                     val confirm = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
@@ -132,8 +134,7 @@ internal class UpdatesMenu(private val activity: Activity, private val ui: Handl
         catalog = AppUpdates.cached(activity)
         follow = AppUpdates.follow(activity, catalog)
         val filter = IntentFilter(SelfInstaller.ACTION_STATUS)
-        if (Build.VERSION.SDK_INT >= 33) activity.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        else activity.registerReceiver(receiver, filter)
+        ContextCompat.registerReceiver(activity, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     fun unregister() {

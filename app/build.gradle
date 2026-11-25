@@ -196,6 +196,8 @@ dependencies {
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.material3:material3'
     implementation 'androidx.activity:activity-compose:1.8.2'
+    // Backports non-exported dynamic receivers to every Android release this app supports.
+    implementation 'androidx.core:core:1.12.0'
     // The File Manager, Bannerlator's: its icon set, image thumbnails and the coroutines it
     // copies on. Same versions as Bannerlator so the screen stays a straight copy.
     implementation 'androidx.compose.material:material-icons-extended'
