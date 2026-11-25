@@ -435,6 +435,7 @@ class FrontEndActivity : ComponentActivity(), com.droiddeck.launcher.ui.AgentPet
 
     private val shortcutsInstallStatus = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: Intent) {
+            if (!com.droiddeck.launcher.update.SelfInstaller.acceptStatus(intent, SteamIntegration.SHORTCUTS_STATUS)) return
             val session = intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_SESSION_ID, -1)
             if (session < 0 || session != ShortcutsInstall.session) return
             val status = intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS,
@@ -1341,8 +1342,9 @@ class FrontEndActivity : ComponentActivity(), com.droiddeck.launcher.ui.AgentPet
         gameSpaceOffered = saved?.getBoolean(STATE_GAME_SPACE_OFFERED) == true
         if (savedInstanceState == null) readIntegrationIntent(intent)
         val shortcutsFilter = android.content.IntentFilter(SteamIntegration.SHORTCUTS_STATUS)
-        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(shortcutsInstallStatus, shortcutsFilter, RECEIVER_NOT_EXPORTED)
-        else registerReceiver(shortcutsInstallStatus, shortcutsFilter)
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, shortcutsInstallStatus, shortcutsFilter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
         readGameIntent(intent)
         // A Lab build is usually the agent's work, so the app comes back where the agent is.
         if (savedInstanceState == null && navRequest == null && com.droiddeck.launcher.lab.LabOverlay.promoted && com.droiddeck.launcher.agent.AgentTab.visible) navRequest = "agent"

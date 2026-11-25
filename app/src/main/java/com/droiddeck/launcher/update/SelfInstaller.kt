@@ -16,9 +16,49 @@ import com.droiddeck.launcher.core.Hashes
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.UUID
 
 object SelfInstaller {
     const val ACTION_STATUS = "com.droiddeck.launcher.update.INSTALL_STATUS"
+    private const val EXTRA_STATUS_TOKEN = "com.droiddeck.launcher.update.STATUS_TOKEN"
+    private val statusCallbacks = StatusCallbacks()
+
+    internal class StatusCallbacks(private val newToken: () -> String = { UUID.randomUUID().toString() }) {
+        private data class Callback(val token: String, val pendingHandled: Boolean = false)
+        private val outstanding = mutableMapOf<Int, Callback>()
+
+        @Synchronized
+        fun create(sessionId: Int): String = newToken().also { token ->
+            check(token.isNotEmpty())
+            outstanding[sessionId] = Callback(token)
+        }
+
+        @Synchronized
+        fun accept(sessionId: Int, token: String?, pendingUserAction: Boolean): Boolean {
+            val callback = outstanding[sessionId] ?: return false
+            val matches = token != null && MessageDigest.isEqual(
+                token.toByteArray(Charsets.UTF_8),
+                callback.token.toByteArray(Charsets.UTF_8),
+            )
+            if (!matches || pendingUserAction && callback.pendingHandled) return false
+            if (pendingUserAction) outstanding[sessionId] = callback.copy(pendingHandled = true)
+            else outstanding.remove(sessionId)
+            return true
+        }
+
+        @Synchronized
+        fun cancel(sessionId: Int) {
+            outstanding.remove(sessionId)
+        }
+    }
+
+    fun acceptStatus(intent: Intent, action: String = ACTION_STATUS): Boolean {
+        if (intent.action != action) return false
+        val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        val token = intent.getStringExtra(EXTRA_STATUS_TOKEN)
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        return statusCallbacks.accept(sessionId, token, status == PackageInstaller.STATUS_PENDING_USER_ACTION)
+    }
 
     fun canInstall(context: Context): Boolean =
         Build.VERSION.SDK_INT < 26 || context.packageManager.canRequestPackageInstalls()
@@ -106,10 +146,20 @@ object SelfInstaller {
                     session.fsync(out)
                 }
             }
-            val status = Intent(action).setPackage(context.packageName)
-            val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-            onSession(id)
-            session.commit(PendingIntent.getBroadcast(context, id, status, flags).intentSender)
+            val token = statusCallbacks.create(id)
+            var committed = false
+            try {
+                val status = Intent(action)
+                    .setPackage(context.packageName)
+                    .putExtra(PackageInstaller.EXTRA_SESSION_ID, id)
+                    .putExtra(EXTRA_STATUS_TOKEN, token)
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+                onSession(id)
+                session.commit(PendingIntent.getBroadcast(context, id, status, flags).intentSender)
+                committed = true
+            } finally {
+                if (!committed) statusCallbacks.cancel(id)
+            }
         }
     }
 
